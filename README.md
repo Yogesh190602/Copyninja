@@ -100,7 +100,18 @@ systemctl --user status copyninja       # Check daemon status
 systemctl --user restart copyninja      # Restart daemon
 journalctl --user -u copyninja -f       # Live logs
 copyninja --version                      # Show version
+./doctor.sh                              # Installation health check
 ```
+
+### Health check
+
+If auto-paste silently fails or something seems off, run the bundled diagnostic:
+
+```bash
+./doctor.sh
+```
+
+It verifies: binary presence, daemon status, config file, GNOME keybinding registration, `ydotoold` running, `input` group membership, `/dev/uinput`, all required tools, and prints any recent daemon warnings. For each failure it tells you exactly which command to run to fix it. Non-destructive, safe to run any time.
 
 ### D-Bus Interface
 
