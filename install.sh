@@ -135,20 +135,27 @@ else
 
     # Ask the GitHub API for the latest release. Unauthenticated requests are
     # rate-limited to 60/hour/IP — enough for a one-shot install script.
+    # The whole block is wrapped in `|| true` at each step because
+    # `set -e -o pipefail` would otherwise abort the script whenever grep
+    # finds no match (e.g. the repo has no releases yet).
     API_URL="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
     RELEASE_JSON="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$API_URL" 2>/dev/null || true)"
 
     ASSET_NAME="copyninja-$RUST_TARGET.tar.gz"
-    # Extract the download URL for our asset from the JSON. Fragile but
-    # avoids a jq dependency for the install script.
-    ASSET_URL="$(echo "$RELEASE_JSON" \
-        | grep -oE "\"browser_download_url\"\s*:\s*\"[^\"]*$ASSET_NAME\"" \
-        | head -n1 \
-        | sed -E 's/.*"([^"]+)"$/\1/')"
-    RELEASE_TAG="$(echo "$RELEASE_JSON" \
-        | grep -oE '"tag_name"\s*:\s*"[^"]+"' \
-        | head -n1 \
-        | sed -E 's/.*"([^"]+)"$/\1/')"
+    ASSET_URL=""
+    RELEASE_TAG=""
+    if [[ -n "$RELEASE_JSON" ]]; then
+        # Extract the download URL for our asset from the JSON. Fragile but
+        # avoids a jq dependency for the install script.
+        ASSET_URL="$(printf '%s' "$RELEASE_JSON" \
+            | grep -oE "\"browser_download_url\"[[:space:]]*:[[:space:]]*\"[^\"]*$ASSET_NAME\"" 2>/dev/null \
+            | sed -E 's/.*"([^"]+)"$/\1/' \
+            | head -n1 || true)"
+        RELEASE_TAG="$(printf '%s' "$RELEASE_JSON" \
+            | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' 2>/dev/null \
+            | sed -E 's/.*"([^"]+)"$/\1/' \
+            | head -n1 || true)"
+    fi
 
     if [[ -n "$ASSET_URL" ]]; then
         info "Found release $RELEASE_TAG → $ASSET_NAME"
