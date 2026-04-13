@@ -111,6 +111,54 @@ else
     info "All runtime dependencies found."
 fi
 
+# ── 1b. Wayland auto-paste plumbing: ydotoold + input group ───────────────
+# On GNOME Wayland (and KDE Wayland), wtype often gets its events dropped
+# by the compositor, and auto-paste falls back to ydotool — which needs
+# two things that the Arch `ydotool` package does NOT set up for you:
+#
+#   1. ydotoold must be running (user systemd unit: ydotool.service)
+#   2. The user must be in the `input` group to access /dev/uinput
+#
+# Without these the user sees a "Auto-paste unavailable" toast and has
+# no idea why. Fix it here, once.
+GROUP_ADDED=0
+
+if [[ "$SESSION_TYPE" == "wayland" || "$SESSION_TYPE" == "both" ]] && command -v ydotool &>/dev/null; then
+    step "Configuring ydotool for auto-paste…"
+
+    # Enable the ydotoold user service if the unit exists and isn't already active.
+    if systemctl --user list-unit-files 2>/dev/null | grep -q '^ydotool\.service'; then
+        if ! systemctl --user is-active ydotool.service &>/dev/null; then
+            systemctl --user enable --now ydotool.service 2>&1 | tail -1 || true
+            if systemctl --user is-active ydotool.service &>/dev/null; then
+                info "Enabled and started ydotool.service (user unit)."
+            else
+                warn "Failed to start ydotool.service — auto-paste via ydotool may not work."
+            fi
+        else
+            info "ydotool.service already running."
+        fi
+    else
+        warn "ydotool.service user unit not found — auto-paste via ydotool will be unavailable."
+        echo "  The 'ydotool' package on Arch installs the unit at /usr/lib/systemd/user/ydotool.service."
+        echo "  If it's missing, reinstall: sudo pacman -S ydotool"
+    fi
+
+    # Check input group membership — required for /dev/uinput access.
+    if ! id -nG "$USER" 2>/dev/null | tr ' ' '\n' | grep -qx 'input'; then
+        step "Adding $USER to the 'input' group (needed for /dev/uinput)…"
+        if sudo usermod -aG input "$USER"; then
+            GROUP_ADDED=1
+            info "Added $USER to 'input' group."
+        else
+            warn "Failed to add $USER to 'input' group — auto-paste via ydotool will fail."
+            echo "  Run manually: sudo usermod -aG input $USER"
+        fi
+    else
+        info "$USER is already in the 'input' group."
+    fi
+fi
+
 # ── 2. Acquire binary: prefer prebuilt from GitHub, fall back to source ───
 GITHUB_REPO="Yogesh190602/Copyninja"
 BUILT_BINARY=""
@@ -453,4 +501,16 @@ echo "    - Copy text normally, it will be saved automatically"
 echo "    - Press Super+Shift+V to open picker"
 echo "    - Click on any entry to copy and auto-paste"
 echo ""
-info "Everything is ready — no logout needed. Enjoy CopyNinja!"
+
+if [[ "$GROUP_ADDED" == "1" ]]; then
+    warn "IMPORTANT — you were just added to the 'input' group."
+    warn "Group membership does not apply to the current session."
+    warn "Auto-paste via ydotool WILL NOT WORK until you either:"
+    echo "    • reboot, OR"
+    echo "    • log out and log back in, OR"
+    echo "    • run 'newgrp input' in each shell you want to test from"
+    echo ""
+    info "Everything else is ready. Enjoy CopyNinja after your next login!"
+else
+    info "Everything is ready — no logout needed. Enjoy CopyNinja!"
+fi

@@ -246,7 +246,7 @@ CI runs automatically on push/PR via GitHub Actions (`.github/workflows/ci.yml`)
 ## Known Limitations
 
 - **GNOME Wayland terminal detection** — auto-detection of focused native Wayland terminals is impossible without a shell extension. Set `paste_mode = "terminal"` in `~/.config/copyninja/config.toml` if auto-paste silently fails in your terminal. See [Paste mode](#paste-mode) for details.
-- **GNOME Wayland auto-paste** — requires `ydotool` with `ydotoold` running (installed automatically by `install.sh`). User must be in the `input` group for `/dev/uinput` access.
+- **GNOME Wayland auto-paste** — requires `ydotoold` running and the user in the `input` group. `install.sh` handles both automatically: enables `systemctl --user enable --now ydotool.service` and runs `sudo usermod -aG input $USER`. **The group change requires a logout/reboot to take effect.** If auto-paste shows "Auto-paste unavailable" on first run after install, log out and back in, then retry.
 - **Image auto-paste** — always fires `Ctrl+V` regardless of `paste_mode`, since `Ctrl+Shift+V` never pastes images in any common app. Pasting works in browsers, image editors (GIMP, Inkscape), document apps (LibreOffice), etc. Terminals cannot accept image paste.
 - **File-manager image copy** — Ctrl+C on an image file in Nautilus/Files/Nemo/Thunar/Dolphin puts a file URI in the clipboard, not image bytes. CopyNinja detects this, reads the file, and stores it as a proper image entry.
 - **Sync conflicts** — concurrent writes from multiple devices within the same second may cause a race; file-sync tools handle this gracefully in practice
