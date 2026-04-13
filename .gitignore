@@ -1,0 +1,27 @@
+# Rust build artifacts
+/target/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.zed/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local config (user-specific)
+.claude/
+
+# Runtime / generated
+*.log
+/tmp/
+*.bak
+*.bak.*
+
+# Legacy Python artifacts (pre-Rust rewrite)
+__pycache__/
+*.pyc
+*.pyo
