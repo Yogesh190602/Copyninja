@@ -56,21 +56,27 @@ Daemon (copyninja daemon)             Picker (copyninja pick)
 | `xdotool` | X11 auto-paste | `sudo pacman -S xdotool` |
 | `ydotool` | GNOME Wayland auto-paste | `sudo pacman -S ydotool` |
 | `libnotify` | Notifications | `sudo pacman -S libnotify` |
-| `rustup` | Rust toolchain | `sudo pacman -S rustup && rustup default stable` |
+| `rustup` | Rust toolchain (**only if building from source** — not needed when using the prebuilt release binary) | `sudo pacman -S rustup && rustup default stable` |
 
 ### Install
 
 ```bash
-cd copyninja-rs
+git clone https://github.com/Yogesh190602/Copyninja.git
+cd Copyninja
 ./install.sh
 ```
 
 This will:
-1. **Acquire the binary** — tries to download a prebuilt binary from the latest [GitHub Release](https://github.com/Yogesh190602/Copyninja/releases) matching your architecture (`x86_64` / `aarch64`). Verifies the SHA256 (if published) and that the binary actually runs on your system. Falls back to building from source with `cargo build --release` if any step fails (no release, glibc too old, download failed, unusual architecture). Force source build with `COPYNINJA_BUILD_FROM_SOURCE=1 ./install.sh`.
-2. Install to `~/.local/bin/copyninja`
-3. Set up the systemd user service
-4. Configure the Super+Shift+V keybinding for your DE
-5. On **GNOME Wayland only**, create a default `~/.config/copyninja/config.toml` with `paste_mode = "terminal"` — because auto-detection is impossible on GNOME Wayland (see [Paste mode](#paste-mode) below). Never overwrites an existing config.
+1. **Check + install missing dependencies** — verifies `gtk4`, `wl-clipboard`, `wtype`, `xclip`, `xdotool`, `ydotool`, `libnotify` are present. If anything is missing, prompts to auto-install via `pacman` (Arch). On non-Arch distros, install the equivalent packages manually first.
+2. **Acquire the binary** — tries to download a prebuilt binary from the latest [GitHub Release](https://github.com/Yogesh190602/Copyninja/releases) matching your architecture (`x86_64` / `aarch64`). Verifies the SHA256 (if published) and that the binary actually runs on your system. Falls back to building from source with `cargo build --release` if any step fails (no release, glibc too old, download failed, unusual architecture). Force source build with `COPYNINJA_BUILD_FROM_SOURCE=1 ./install.sh`.
+3. **Stop any running copyninja daemon** (if reinstalling) so the binary can be replaced cleanly. Installs to `~/.local/bin/copyninja`.
+4. **Set up the systemd user service** and start the daemon.
+5. **On Wayland** — enables the `ydotool.service` user unit and adds your user to the `input` group (required for `/dev/uinput` access). This is what makes auto-paste actually work on GNOME/KDE Wayland.
+6. **Configure the Super+Shift+V keybinding** for your desktop environment (GNOME, Hyprland, Sway, i3).
+7. **On GNOME Wayland only**, create a default `~/.config/copyninja/config.toml` with `paste_mode = "terminal"` — because focused-window detection is impossible on GNOME Wayland without a shell extension (see [Paste mode](#paste-mode) below). Never overwrites an existing config.
+8. **Prompt to reboot** if the `input` group was just added. Group membership doesn't apply to the current session, so auto-paste won't work until you reboot or log out + log back in. Answer `y` to reboot immediately, or `N` to do it yourself later.
+
+After install, verify everything with `./doctor.sh` (see [Health check](#health-check) below).
 
 ### Uninstall
 
