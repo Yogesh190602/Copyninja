@@ -83,6 +83,10 @@ command -v xdotool &>/dev/null || { MISSING+=("xdotool"); PACKAGES_TO_INSTALL+=(
 if [[ "$SESSION_TYPE" == "wayland" || "$SESSION_TYPE" == "both" ]]; then
     command -v wl-paste &>/dev/null || { MISSING+=("wl-paste"); PACKAGES_TO_INSTALL+=("wl-clipboard"); }
     command -v wtype    &>/dev/null || { MISSING+=("wtype");    PACKAGES_TO_INSTALL+=("wtype"); }
+    # ydotool is required for auto-paste on GNOME Wayland (wtype is blocked
+    # by Mutter). Include it unconditionally on Wayland so section 1b can
+    # enable the user service and add the user to the input group.
+    command -v ydotool  &>/dev/null || { MISSING+=("ydotool");  PACKAGES_TO_INSTALL+=("ydotool"); }
 fi
 
 # Check GTK4 system library (needed by the Rust binary at runtime)
@@ -268,6 +272,17 @@ info "Binary ready: $(du -h "$BUILT_BINARY" | cut -f1)"
 # ── 3. Install binary ─────────────────────────────────────────────────────
 step "Installing binary to $INSTALL_DIR…"
 mkdir -p "$INSTALL_DIR"
+
+# If the daemon is already running on a previous build, we can't overwrite
+# the binary while the kernel holds it open ("Text file busy"). Stop it
+# first, and remember we did so we can start it again below.
+RESTART_DAEMON=0
+if systemctl --user is-active copyninja.service &>/dev/null; then
+    systemctl --user stop copyninja.service
+    RESTART_DAEMON=1
+    info "Stopped running copyninja daemon so binary can be replaced."
+fi
+
 cp "$BUILT_BINARY" "$INSTALL_DIR/$BINARY_NAME"
 chmod +x "$INSTALL_DIR/$BINARY_NAME"
 
@@ -505,12 +520,20 @@ echo ""
 if [[ "$GROUP_ADDED" == "1" ]]; then
     warn "IMPORTANT — you were just added to the 'input' group."
     warn "Group membership does not apply to the current session."
-    warn "Auto-paste via ydotool WILL NOT WORK until you either:"
-    echo "    • reboot, OR"
-    echo "    • log out and log back in, OR"
-    echo "    • run 'newgrp input' in each shell you want to test from"
+    warn "Auto-paste via ydotool WILL NOT WORK until you reboot or re-login."
     echo ""
-    info "Everything else is ready. Enjoy CopyNinja after your next login!"
+    read -rp "Reboot now to apply the group change? [y/N] " reboot_answer
+    if [[ "$reboot_answer" =~ ^[Yy]$ ]]; then
+        info "Rebooting in 3 seconds… (Ctrl+C to cancel)"
+        sleep 3
+        sudo systemctl reboot
+    else
+        warn "Skipping reboot. Auto-paste won't work until you log out and back in."
+        echo "   Alternatives:"
+        echo "     • reboot later with:  sudo systemctl reboot"
+        echo "     • logout + login (group change takes effect for new sessions)"
+        echo "     • run 'newgrp input' in each shell you want to test from"
+    fi
 else
     info "Everything is ready — no logout needed. Enjoy CopyNinja!"
 fi
