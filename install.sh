@@ -111,22 +111,104 @@ else
     info "All runtime dependencies found."
 fi
 
-# ── 2. Build the Rust binary ──────────────────────────────────────────────
-step "Building CopyNinja (release mode)…"
+# ── 2. Acquire binary: prefer prebuilt from GitHub, fall back to source ───
+GITHUB_REPO="Yogesh190602/Copyninja"
+BUILT_BINARY=""
 
-if ! command -v cargo &>/dev/null; then
-    error "Rust toolchain not found. Install via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+# Map `uname -m` to Rust target triples for release asset naming.
+ARCH="$(uname -m)"
+case "$ARCH" in
+    x86_64|amd64)  RUST_TARGET="x86_64-unknown-linux-gnu" ;;
+    aarch64|arm64) RUST_TARGET="aarch64-unknown-linux-gnu" ;;
+    *)             RUST_TARGET="" ;;
+esac
+
+# Allow the user to skip the download entirely.
+if [[ "${COPYNINJA_BUILD_FROM_SOURCE:-0}" == "1" ]]; then
+    warn "COPYNINJA_BUILD_FROM_SOURCE=1 set — skipping prebuilt binary download."
+elif [[ -z "$RUST_TARGET" ]]; then
+    warn "No prebuilt binary available for architecture '$ARCH' — will build from source."
+elif ! command -v curl &>/dev/null; then
+    warn "curl not found — cannot download prebuilt binary, will build from source."
+else
+    step "Looking for prebuilt binary on GitHub ($GITHUB_REPO)…"
+
+    # Ask the GitHub API for the latest release. Unauthenticated requests are
+    # rate-limited to 60/hour/IP — enough for a one-shot install script.
+    API_URL="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+    RELEASE_JSON="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$API_URL" 2>/dev/null || true)"
+
+    ASSET_NAME="copyninja-$RUST_TARGET.tar.gz"
+    # Extract the download URL for our asset from the JSON. Fragile but
+    # avoids a jq dependency for the install script.
+    ASSET_URL="$(echo "$RELEASE_JSON" \
+        | grep -oE "\"browser_download_url\"\s*:\s*\"[^\"]*$ASSET_NAME\"" \
+        | head -n1 \
+        | sed -E 's/.*"([^"]+)"$/\1/')"
+    RELEASE_TAG="$(echo "$RELEASE_JSON" \
+        | grep -oE '"tag_name"\s*:\s*"[^"]+"' \
+        | head -n1 \
+        | sed -E 's/.*"([^"]+)"$/\1/')"
+
+    if [[ -n "$ASSET_URL" ]]; then
+        info "Found release $RELEASE_TAG → $ASSET_NAME"
+        TMPDIR="$(mktemp -d)"
+        trap 'rm -rf "$TMPDIR"' EXIT
+
+        if curl -fsSL --retry 2 -o "$TMPDIR/$ASSET_NAME" "$ASSET_URL"; then
+            # Optional integrity check — works if maintainer uploaded the .sha256 file.
+            SHA_URL="${ASSET_URL}.sha256"
+            if curl -fsSL -o "$TMPDIR/$ASSET_NAME.sha256" "$SHA_URL" 2>/dev/null; then
+                if (cd "$TMPDIR" && sha256sum -c "$ASSET_NAME.sha256" >/dev/null 2>&1); then
+                    info "SHA256 verified."
+                else
+                    warn "SHA256 mismatch — refusing to install this binary; will build from source."
+                    rm -rf "$TMPDIR"
+                    BUILT_BINARY=""
+                fi
+            fi
+
+            if [[ -f "$TMPDIR/$ASSET_NAME" ]]; then
+                tar -xzf "$TMPDIR/$ASSET_NAME" -C "$TMPDIR"
+                CANDIDATE="$TMPDIR/$BINARY_NAME"
+
+                # Sanity-check: the binary must actually run on this system.
+                # If glibc is too old, `--version` will fail — we detect that
+                # and fall back to source build transparently.
+                if [[ -x "$CANDIDATE" ]] && "$CANDIDATE" --version &>/dev/null; then
+                    BUILT_BINARY="$CANDIDATE"
+                    info "Prebuilt binary works on this system — skipping source build."
+                else
+                    warn "Prebuilt binary won't run here (likely glibc mismatch). Building from source instead."
+                    BUILT_BINARY=""
+                fi
+            fi
+        else
+            warn "Download failed — will build from source."
+        fi
+    else
+        warn "No release found (or no asset for $RUST_TARGET) — will build from source."
+    fi
 fi
 
-cd "$SCRIPT_DIR"
-cargo build --release 2>&1 | tail -3
-BUILT_BINARY="$SCRIPT_DIR/target/release/$BINARY_NAME"
+# Fall back to a local source build if the download path didn't succeed.
+if [[ -z "$BUILT_BINARY" ]]; then
+    step "Building CopyNinja from source (release mode)…"
 
-if [[ ! -f "$BUILT_BINARY" ]]; then
-    error "Build failed — binary not found at $BUILT_BINARY"
+    if ! command -v cargo &>/dev/null; then
+        error "Rust toolchain not found. Install via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
+    fi
+
+    cd "$SCRIPT_DIR"
+    cargo build --release 2>&1 | tail -3
+    BUILT_BINARY="$SCRIPT_DIR/target/release/$BINARY_NAME"
+
+    if [[ ! -f "$BUILT_BINARY" ]]; then
+        error "Build failed — binary not found at $BUILT_BINARY"
+    fi
 fi
 
-info "Build complete: $(du -h "$BUILT_BINARY" | cut -f1) binary"
+info "Binary ready: $(du -h "$BUILT_BINARY" | cut -f1)"
 
 # ── 3. Install binary ─────────────────────────────────────────────────────
 step "Installing binary to $INSTALL_DIR…"
