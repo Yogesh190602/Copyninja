@@ -16,12 +16,18 @@ pub async fn start() -> Result<()> {
         .stderr(Stdio::piped())
         .spawn()?;
 
-    // Check if the process exits immediately (no Wayland display)
+    // Check if the process exits immediately (missing display or unsupported protocol).
     tokio::time::sleep(Duration::from_millis(500)).await;
     if let Ok(Some(status)) = child.try_wait() {
+        let output = child.wait_with_output().await?;
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            bail!("wl-paste exited immediately with status: {}", status);
+        }
         bail!(
-            "wl-paste exited immediately with status: {} (no Wayland display?)",
-            status
+            "wl-paste exited immediately with status: {} ({})",
+            status,
+            stderr
         );
     }
 
@@ -43,6 +49,47 @@ pub async fn start() -> Result<()> {
     let status = child.wait().await?;
     error!("wl-paste --watch exited with status: {}", status);
     bail!("wl-paste --watch exited unexpectedly")
+}
+
+/// Polling fallback for compositors that lack wlr-data-control (e.g. GNOME/Mutter).
+/// Polls `wl-paste` every 500 ms; calls fetch_and_store() when content changes.
+/// Returns Err only if wl-paste is not installed at all.
+pub async fn start_polling() -> Result<()> {
+    // Verify wl-paste exists by doing a quick probe.
+    let probe = Command::new("wl-paste")
+        .args(["--list-types"])
+        .output()
+        .await;
+    if let Err(e) = probe {
+        bail!("wl-paste not found, cannot use Wayland polling: {}", e);
+    }
+
+    info!("Wayland --watch unavailable; falling back to wl-paste polling (500ms)");
+
+    let mut last_hash: Option<md5::Digest> = None;
+
+    loop {
+        let output = Command::new("wl-paste")
+            .args(["--no-newline"])
+            .output()
+            .await;
+
+        match output {
+            Ok(out) if out.status.success() && !out.stdout.is_empty() => {
+                let hash = compute_hash(&out.stdout);
+                if last_hash.as_ref() != Some(&hash) {
+                    last_hash = Some(hash);
+                    debug!("Clipboard change detected (polling), fetching content");
+                    fetch_and_store().await;
+                }
+            }
+            _ => {
+                last_hash = None;
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 /// Detect available MIME types and fetch the best one.
@@ -135,4 +182,8 @@ async fn fetch_clipboard_bytes(mime: &str) -> Result<Vec<u8>> {
     }
 
     Ok(output.stdout)
+}
+
+fn compute_hash(data: &[u8]) -> md5::Digest {
+    md5::compute(data)
 }

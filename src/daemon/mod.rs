@@ -96,16 +96,24 @@ async fn run_async() -> anyhow::Result<()> {
 
         match session {
             SessionType::Wayland => {
-                // Try native Wayland watcher first
+                // Try event-driven watcher first (wlroots compositors: Sway, Hyprland, etc.)
                 match wayland::start().await {
                     Ok(()) => return Ok(()),
                     Err(e) => {
                         warn!("Wayland watcher failed: {}", e);
-                        // Fall back to X11 (XWayland) like GNOME Wayland
-                        info!("Trying X11/XWayland fallback...");
-                        match x11::start().await {
+                        // Try polling fallback (GNOME/Mutter — lacks wlr-data-control)
+                        info!("Trying Wayland polling fallback...");
+                        match wayland::start_polling().await {
                             Ok(()) => return Ok(()),
-                            Err(e) => warn!("X11 fallback failed: {}", e),
+                            Err(e) => {
+                                warn!("Wayland polling failed: {}", e);
+                                // Last resort: X11/XWayland
+                                info!("Trying X11/XWayland fallback...");
+                                match x11::start().await {
+                                    Ok(()) => return Ok(()),
+                                    Err(e) => warn!("X11 fallback failed: {}", e),
+                                }
+                            }
                         }
                     }
                 }
